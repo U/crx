@@ -3,115 +3,360 @@ var fs = require("fs")
   , crypto = require("crypto")
   , child = require("child_process")
   , spawn = child.spawn
-  , exec = child.exec
+  , exec = child.exec,
+    STATIC_HEADERS_BYTES_SIZE = 16, //a crx starts with 16 bytes that are fixed-size headers.
+    PUB_KEY_LENGTH = 4,
+    PUB_KEY_LENGTH_OFFSET = 8;
 
 module.exports = new function() {
   function ChromeExtension(attrs) {
     if (this instanceof ChromeExtension) {
-      for (var name in attrs) this[name] = attrs[name]
+      for (var name in attrs) this[name] = attrs[name];
 
-      this.path = join("/tmp", "crx-" + (Math.random() * 1e17).toString(36))
+      this.path = join("/tmp", "crx-" + (Math.random() * 1e17).toString(36));
     }
 
-    else return new ChromeExtension(attrs)
+    else return new ChromeExtension(attrs);
   }
 
-  ChromeExtension.prototype = this
+  ChromeExtension.prototype = this;
 
+  /**
+   * Deletes the temp dir storing the files.
+   */
   this.destroy = function() {
     spawn("rm", ["-rf", this.path])
-  }
+  };
 
-  this.pack = function(cb) {
-    if (!this.loaded) return this.load(function(err) {
-      return err ? cb(err) : this.pack(cb)
-    })
+    /**
+     * Creates a .crx file from the directory.
+     * @param cb
+     * @return {*}
+     */
+    this.pack = function (cb) {
+        var that = this;
 
-    this.generatePublicKey(function(err) {
-      if (err) return cb(err)
+        if (!this.loaded) return this.load(function (err) {
+            return err ? cb(err) : that.pack(cb);
+        });
 
-      var manifest = JSON.stringify(this.manifest)
+        that.generatePublicKey(function (err) {
+            if (err) return cb(err);
 
-      this.writeFile("manifest.json", manifest, function(err) {
-        if (err) return cb(err)
-        
-        this.loadContents(function(err) {
-          if (err) return cb(err)
+            var manifest = JSON.stringify(this.manifest);
 
-          this.generateSignature()
-          this.generatePackage()
+            that.writeFile("manifest.json", manifest, function (err) {
+                if (err) return cb(err);
 
-          cb.call(this, null, this.package)
-        })
-      })
-    })
-  }
+                that.loadContents(function (err) {
+                    if (err) return cb(err);
 
-  this.load = function(cb) {
-    var child = spawn("cp", ["-R", this.rootDirectory, this.path])
+                    that.generateSignature();
+                    that.generatePackage();
 
-    child.on("exit", function() {
-      this.manifest = require(join(this.path, "manifest.json"))
-      this.loaded = true
+                    cb.call(this, null, this.package);
+                });
+            });
+        });
+    };
 
-      cb.call(this)
-    }.bind(this))
-  }
+    /**
+     * @param callback - Will be called with (err, publicKeyBytesLen).
+     */
+    this.readPublicKeyLength = function (fd, callback) {
+        var readLength = STATIC_HEADERS_BYTES_SIZE;
+        fs.read(fd, new Buffer(readLength), 0, readLength, null,
+            function (err, numBytesRead, buffer) {
+                var lenBuffer,
+                    publicKeyBytesLen;
+                if (err)
+                    return callback(err);
+
+                if (numBytesRead !== readLength)
+                    return callback('Number of bytes read was ' + numBytesRead + ' but expected ' + readLength);
+
+                console.log('Buffer\'s first 4 bytes are:', buffer.slice(0, 4).toString());
+
+                lenBuffer = buffer.slice(PUB_KEY_LENGTH_OFFSET, PUB_KEY_LENGTH_OFFSET + PUB_KEY_LENGTH);
+                publicKeyBytesLen = lenBuffer.readUInt8(0, 'little'); //the crx headers use little endian format
+                callback(null, publicKeyBytesLen);
+            });
+    };
+
+//    /**
+//     * Calculates then extension ID from the public key read from the header of the crx.
+//     * The crx is found in this.crxPath.
+//     * For the crx file format see: http://developer.chrome.com/extensions/crx.html
+//     * @param callback - Will be called with (err, extensionId).
+//     */
+//    this.readExtensionId = function (callback) {
+//        var that = this;
+//
+////        nCenterPublicKey = 'MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQCmzcH+EdLz3eCcmEerra/lgaM4iQBzQNHmMszDEfq04hNUCRgP7ham3Qk+XLzHc3XALcQH5yUuXjzPMaQ+LsGKMnV3j7U5tH86uQXixApCNww8iUJkgQbM8uNYshCSyyWCZGdjrJhlca2uyHhtwKK/47hqpzpjv3war97waWFiSwIDAQAB';
+////        this.publicKey = new Buffer(nCenterPublicKey, 'base64');
+////
+////        t = this.generateAppId();
+////        console.log("t:", t);
+////        debugger;
+//
+//        fs.open(this.crxPath, 'r', function (err, fd) {
+//            that.readPublicKeyLength(fd, function (err, publicKeyBytesLen) {
+//                if (err) {
+//                    fs.close(fd); //we don't need this stream anymore
+//                    return callback(err);
+//                }
+//
+//                if (publicKeyBytesLen <= 0) {
+//                    fs.close(fd); //we don't need this stream anymore
+//                    return callback('Got wrong length of public key. the value read was: ' + publicKeyBytesLen);
+//                }
+//
+//                fs.read(fd, new Buffer(publicKeyBytesLen), 0, publicKeyBytesLen, null,
+//                    function (err, numBytesRead, buffer) {
+//                        fs.close(fd); //we don't need this stream anymore
+//
+//                        if (err)
+//                            return callback(err);
+//
+//                        if (numBytesRead !== publicKeyBytesLen)
+//                            return callback('Number of bytes read was ' + numBytesRead + ' but expected ' + publicKeyBytesLen);
+//
+//                        that.publicKey = buffer;
+//                        that.generateAppId();
+//                        console.log('extension ID:', that.appId);
+//                        callback(null, that.appId);
+//                    });
+//            });
+//        });
+//    };
+
+    this.readExtensionId = function (callback) {
+        var that = this;
+        if (typeof callback !== 'function')
+            return;
+
+        this.readPublicKeyFromFile(function (err, publicKey) {
+            if (err)
+                return callback(err);
+
+            that.publicKey = publicKey;
+            that.generateAppId();
+            console.log('extension ID:', that.appId);
+            callback(null, that.appId);
+        });
+    };
+
+    /**
+     * Reads the public key from the header of the CRX file found in this.crx.
+     * @param callback - Will be called with (err, publicKey)
+     */
+    this.readPublicKeyFromFile = function (callback) {
+        var that = this;
+        if (typeof callback !== 'function')
+            return;
+        if (!this.crxPath)
+            return callback('no crxPath given.');
+
+        fs.open(this.crxPath, 'r', function (err, fd) {
+            that.readPublicKeyLength(fd, function (err, publicKeyBytesLen) {
+                if (err) {
+                    fs.close(fd); //we don't need this stream anymore
+                    return callback(err);
+                }
+
+                if (publicKeyBytesLen <= 0) {
+                    fs.close(fd); //we don't need this stream anymore
+                    return callback('Got wrong length of public key. the value read was: ' + publicKeyBytesLen);
+                }
+
+                fs.read(fd, new Buffer(publicKeyBytesLen), 0, publicKeyBytesLen, null,
+                    function (err, numBytesRead, publicKey) {
+                        fs.close(fd); //we don't need this stream anymore
+                        if (err)
+                            return callback(err);
+                        if (numBytesRead !== publicKeyBytesLen)
+                            return callback('Number of bytes read was ' + numBytesRead + ' but expected ' + publicKeyBytesLen);
+
+                        callback(null, publicKey);
+                    });
+            });
+        });
+    };
+
+  /**
+   * Extracts the .crx file located in the 'crxPath' passed in the constructor,
+   * to the folder defined in this.path.
+   * @param {function} callback - Will be called with the path to which the .crx file has been extracted.
+   */
+  this.unpack = function (callback) {
+      var unzipStr = 'unzip -qd '+ this.path +' ' + this.crxPath,
+          that = this;
+//          unzip = spawn('unzip', ['-d', this.path, this.crxPath]);
+
+//      exec(unzipStr, this.onLoadFinished.call(this, function () {
+//          that.rootDirectory = that.path;
+//          if (typeof callback === 'function')
+//              callback();
+//      }));
+
+      exec(unzipStr, function () {
+          that.rootDirectory = that.path;
+          that.onLoadFinished(callback);
+      });
+  };
+
+  /**
+   * Loads manifest.json into this.manifest, and sets this.loaded to True.
+   * @param callback
+   */
+  this.onLoadFinished = function (callback) {
+      this.manifest = require(join(this.path, "manifest.json"));
+      this.loaded = true;
+
+      if (typeof callback === 'function')
+          callback();
+  };
+
+    /**
+     * Called from pack()
+     * @param cb
+     */
+    this.load = function (cb) {
+        var child = spawn("cp", ["-R", this.rootDirectory, this.path]);
+
+        child.on("exit", function () {
+            this.onLoadFinished(cb);
+        }.bind(this));
+
+//    child.on("exit", function() {
+//      this.manifest = require(join(this.path, "manifest.json"));
+//      this.loaded = true;
+//
+//      cb.call(this)
+//    }.bind(this));
+    };
 
   this.readFile = function(name, cb) {
-    var path = join(this.path, name)
+    var path = join(this.path, name);
 
     fs.readFile(path, "binary", function(err, data) {
-      if (err) return cb.call(this, err)
+      if (err) return cb.call(this, err);
 
-      cb.call(this, null, this[name] = data)
-    }.bind(this))
-  }
+      cb.call(this, null, this[name] = data);
+    }.bind(this));
+  };
 
   this.writeFile = function(path, data, cb) {
-    path = join(this.path, path)
+    path = join(this.path, path);
 
     fs.writeFile(path, data, function(err, data) {
-      if (err) return cb.call(this, err)
+      if (err) return cb.call(this, err);
 
-      cb.call(this)
-    }.bind(this))
-  }
+      cb.call(this);
+    }.bind(this));
+  };
 
   this.generatePublicKey = function(cb) {
-    var rsa = spawn("openssl", ["rsa", "-pubout", "-outform", "DER"])
+    var rsa = spawn("openssl", ["rsa", "-pubout", "-outform", "DER"]);
 
     rsa.stdout.on("data", function(data) {
-      this.publicKey = data
-      cb && cb.call(this, null, this)
-    }.bind(this))
+      this.publicKey = data;
+      cb && cb.call(this, null, this);
+    }.bind(this));
 
-    rsa.stdin.end(this.privateKey)
-  }
+    rsa.stdin.end(this.privateKey);
+  };
 
-  this.generateSignature = function() {
-    return this.signature = new Buffer(
-      crypto
-        .createSign("sha1")
-        .update(this.contents)
-        .sign(this.privateKey),
+    /**
+     * Calculates the public key derived from the given private key.
+     * @param privateKey
+     * @param callback - Will be called with (err, publicKey)
+     */
+    this.calculatePublicKeyFromPrivateKey = function (privateKey, callback) {
+        var rsa;
+        if (typeof callback !== 'function')
+            return;
 
-      "binary"
-    )
-  }
+        rsa = spawn("openssl", ["rsa", "-pubout", "-outform", "DER"]);
 
+        rsa.stdout.on("data", function(publicKey) {
+          callback(null, publicKey);
+        });
+
+        rsa.stdin.end(privateKey);
+    };
+
+    /**
+     * Called from this.pack()
+     * @return {*}
+     */
+    this.generateSignature = function() {
+        var signatureStr = crypto.createSign("sha1").update(this.contents).sign(this.privateKey);
+        return this.signature = new Buffer(signatureStr, "binary");
+    };
+
+    /**
+     * Sets this.privateKey to be the given private key, if the given key is indeed the one that was used
+     * to create the CRX in this.crxPath.
+     * @param privateKey
+     * @param callback - Will be called with (err)
+     */
+    this.setPrivateKey = function (privateKey, callback) {
+        if (typeof callback !== 'function')
+            return;
+        if (!this.crxPath)
+            return callback('no crxPath given.');
+
+        this.verifyPrivateKeyBelongsToCrx(privateKey, function (err, belongs) {
+            if (err)
+                return callback(err);
+            if (!belongs)
+                return callback('The given private key does not belong to the crx in the crxPath that was set.');
+            //else, the private key belongs to the CRX and everything is OK.
+            this.privateKey = privateKey;
+            callback(null);
+        });
+    };
+
+    /**
+     * Compares the public key read from the header of this.crxPath
+     * to the one calculated from the given private key.
+     * @param privateKey
+     * @param callback - Will be called with (err, belongs)
+     */
+    this.verifyPrivateKeyBelongsToCrx = function (privateKey, callback) {
+        var that = this;
+        if (typeof callback !== 'function')
+            return;
+
+        this.calculatePublicKeyFromPrivateKey(privateKey, function (err, publicKeyFromPrivateKey) {
+            if (err)
+                return callback(err);
+            that.readPublicKeyFromFile(function (err, publicKeyReadFromFile) {
+                if (err)
+                    return callback(err);
+                //now determine if the two public keys are the same
+                callback(null, publicKeyReadFromFile === publicKeyFromPrivateKey);
+            });
+        });
+    };
+
+  /**
+   * Zips the contents of the folder of this.path.
+   * @param cb - Callback
+   */
   this.loadContents = function(cb) {
-    var command = "zip -qr -9 -X - . -x key.pem"
-      , options = {cwd: this.path, encoding: "binary", maxBuffer: this.maxBuffer}
+    var command = "zip -qr -9 -X - . -x key.pem",
+        options = {cwd: this.path, encoding: "binary", maxBuffer: this.maxBuffer};
 
     exec(command, options, function(err, data) {
-      if (err) return cb.call(this, err)
+      if (err) return cb.call(this, err);
 
-      this.contents = new Buffer(data, "binary")
+      this.contents = new Buffer(data, "binary");
 
-      cb.call(this)
-    }.bind(this))
-  }
+      cb.call(this);
+    }.bind(this));
+  };
   
   this.generatePackage = function() {
     var signature = this.signature
@@ -123,20 +368,20 @@ module.exports = new function() {
       , zipLength = contents.length
       , length = 16 + keyLength + sigLength + zipLength
 
-      , crx = new Buffer(length)
+      , crx = new Buffer(length);
 
-    crx.write("Cr24" + Array(13).join("\x00"), "binary")
+    crx.write("Cr24" + Array(13).join("\x00"), "binary");
 
-    crx[4] = 2
-    crx[8] = keyLength
-    crx[12] = sigLength
+    crx[4] = 2;
+    crx[8] = keyLength;
+    crx[12] = sigLength;
 
-    publicKey.copy(crx, 16)
-    signature.copy(crx, 16 + keyLength)
-    contents.copy(crx, 16 + keyLength + sigLength)
+    publicKey.copy(crx, 16);
+    signature.copy(crx, 16 + keyLength);
+    contents.copy(crx, 16 + keyLength + sigLength);
 
-    return this.package = crx
-  }
+    return this.package = crx;
+  };
 
   this.generateAppId = function() {
     return this.appId = crypto
@@ -145,23 +390,23 @@ module.exports = new function() {
       .digest("hex")
       .slice(0, 32)
       .replace(/./g, function(x) {
-        return (parseInt(x, 16) + 10).toString(26)
-      })
-  }
+        return (parseInt(x, 16) + 10).toString(26);
+      });
+  };
 
   this.generateUpdateXML = function() {
-    if (!this.codebase) throw new Error("No URL provided for update.xml.")
+    if (!this.codebase) throw new Error("No URL provided for update.xml.");
 
     return this.updateXML =
-      Buffer(
+      new Buffer(
         "<?xml version='1.0' encoding='UTF-8'?>\n" +
         "<gupdate xmlns='http://www.google.com/update2/response' protocol='2.0'>\n" +
         "  <app appid='" + this.generateAppId() + "'>\n" +
         "    <updatecheck codebase='" + this.codebase + "' version='" + this.manifest.version + "' />\n" +
         "  </app>\n" +
         "</gupdate>"
-      )
-  }
+      );
+  };
 
-  return ChromeExtension
-}
+  return ChromeExtension;
+};

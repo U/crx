@@ -2,7 +2,7 @@
   "author": "Itay Cohen",
   "name": "crx_itayco",
   "description": "Build Google Chrome extensions with node.js",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "homepage": "https://github.com/itayco/crx",
   "bin": {
     "crx": "./bin/crx.js"

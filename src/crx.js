@@ -304,6 +304,7 @@ module.exports = new function() {
      * @param callback - Will be called with (err)
      */
     this.setPrivateKey = function (privateKey, callback) {
+        var that = this;
         if (typeof callback !== 'function')
             return;
         if (!this.crxPath)
@@ -315,7 +316,7 @@ module.exports = new function() {
             if (!belongs)
                 return callback('The given private key does not belong to the crx in the crxPath that was set.');
             //else, the private key belongs to the CRX and everything is OK.
-            this.privateKey = privateKey;
+            that.privateKey = privateKey;
             callback(null);
         });
     };

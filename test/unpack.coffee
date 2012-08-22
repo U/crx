@@ -3,8 +3,14 @@ fs = require 'fs'
 ChromeExtension = require '../'
 
 crx = new ChromeExtension
-  crxPath: '/tmp/80cd8b804796ba0307a041d7e18810b8'
+  crxPath: '/tmp/5d58b482687e2c2b060fc19f877425b0'
 #  crxPath: 'myFirstExtension.crx'
+
+privateKey = fs.readFileSync '/tmp/ecf3b8df877d4bea04e01393adebc369'
+
+crx.setPrivateKey privateKey, (err) ->
+  if !err
+    console.log 'Private key compatible!!!'
 
 crx.readExtensionId (err, extensionId) ->
   m = crx.manifest

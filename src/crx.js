@@ -8,6 +8,8 @@ var fs = require("fs")
     PUB_KEY_LENGTH = 4,
     PUB_KEY_LENGTH_OFFSET = 8;
 
+require('buffertools');
+
 module.exports = new function() {
   function ChromeExtension(attrs) {
     if (this instanceof ChromeExtension) {
@@ -333,10 +335,13 @@ module.exports = new function() {
             if (err)
                 return callback(err);
             that.readPublicKeyFromFile(function (err, publicKeyReadFromFile) {
+                var privateKeyBelongsToCrx;
                 if (err)
                     return callback(err);
+
                 //now determine if the two public keys are the same
-                callback(null, publicKeyReadFromFile === publicKeyFromPrivateKey);
+                privateKeyBelongsToCrx = publicKeyReadFromFile.compare(publicKeyFromPrivateKey) == 0;
+                callback(null, privateKeyBelongsToCrx);
             });
         });
     };

@@ -1,5 +1,6 @@
 var fs = require("fs")
-  , join = require("path").join
+  , path = require('path')
+  , join = path.join
   , crypto = require("crypto")
   , child = require("child_process")
   , spawn = child.spawn
@@ -12,6 +13,7 @@ require('buffertools');
 
 module.exports = new function() {
   function ChromeExtension(attrs) {
+      console.log('T.Z:', __dirname);
     if (this instanceof ChromeExtension) {
       for (var name in attrs) this[name] = attrs[name];
 
@@ -79,6 +81,7 @@ module.exports = new function() {
      */
     this._writeCrx = function (callback) {
         var pemFilename = this.path+'.pem',
+            packerPath = path.resolve(__dirname+'/../pack.sh'),
             packer,
             crxFilename;
 
@@ -86,7 +89,7 @@ module.exports = new function() {
         fs.writeFileSync(pemFilename, this.privateKey);
 
         //2. execute pack.sh with /tmp
-        packer = spawn('./pack.sh', [this.path, pemFilename, '/tmp']);
+        packer = spawn(packerPath, [this.path, pemFilename, '/tmp']);
         packer.stdout.on('data', function (filename) {
             //3. collect the written CRX filename
             crxFilename = filename.toString();
@@ -103,7 +106,7 @@ module.exports = new function() {
             if (exitCode !== 0)
                 return callback('The CRX packer exited with erroneous code: ' + exitCode);
 
-            //5. callback the CRX filename
+            //5. callback with the CRX filename
             callback(null, crxFilename);
         });
     };

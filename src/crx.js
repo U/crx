@@ -27,38 +27,84 @@ module.exports = new function() {
    * Deletes the temp dir storing the files.
    */
   this.destroy = function() {
-    spawn("rm", ["-rf", this.path])
+    spawn("rm", ["-rf", this.path]);
   };
 
     /**
-     * Creates a .crx file from the directory.
-     * @param cb
-     * @return {*}
+     * Packs the directory in this.path into a CRX file, which will be put in the given filename.
+     * @param callback - Will be called with (err, crxFilename)
      */
-    this.pack = function (cb) {
+    this.pack = function (callback) {
         var that = this;
+        if (typeof callback !== 'function')
+            return;
 
         if (!this.loaded) return this.load(function (err) {
-            return err ? cb(err) : that.pack(cb);
+            return err ? callback(err) : that.pack(callback);
         });
 
-        that.generatePublicKey(function (err) {
-            if (err) return cb(err);
+        this._beforePacking(function (err) {
+            if (err) return callback(err);
 
-            var manifest = JSON.stringify(this.manifest);
+            that._writeCrx(callback);
+        });
+    };
+
+    /**
+     * Performs actions which should be performed before zipping the CRX:
+     * 1. Calculates the public key if it hasn't been already calculated.
+     * 2. updates the manifest.json file found in this.path.
+     * @param callback - will be called with (err)
+     */
+    this._beforePacking = function (callback) {
+        var that = this;
+        this.generatePublicKey(function (err) {
+            var manifest;
+
+            if (err) return callback(err);
+
+            manifest = JSON.stringify(this.manifest);
 
             that.writeFile("manifest.json", manifest, function (err) {
-                if (err) return cb(err);
-
-                that.loadContents(function (err) {
-                    if (err) return cb(err);
-
-                    that.generateSignature();
-                    that.generatePackage();
-
-                    cb.call(this, null, this.package);
-                });
+                if (err) return callback(err);
+                //else, everything is OK
+                return callback(null);
             });
+        });
+    };
+
+    /**
+     * Creates the CRX file from the current info, and calls the callback with the written filename
+     * @param callback - Will be called with (err, crxFilename)
+     */
+    this._writeCrx = function (callback) {
+        var pemFilename = this.path+'.pem',
+            packer,
+            crxFilename;
+
+        //1. save the private key to a PEM file
+        fs.writeFileSync(pemFilename, this.privateKey);
+
+        //2. execute pack.sh with /tmp
+        packer = spawn('./pack.sh', [this.path, pemFilename, '/tmp']);
+        packer.stdout.on('data', function (filename) {
+            //3. collect the written CRX filename
+            crxFilename = filename.toString();
+            crxFilename = crxFilename.substr(0, crxFilename.length-1); //cut the trailing '\n'
+        });
+
+        packer.on('exit', function (exitCode) {
+            //4. delete the PEM file.
+            spawn("rm", ["-rf", pemFilename]);
+
+            if (typeof callback !== 'function')
+                return;
+
+            if (exitCode !== 0)
+                return callback('The CRX packer exited with erroneous code: ' + exitCode);
+
+            //5. callback the CRX filename
+            callback(null, crxFilename);
         });
     };
 
@@ -84,53 +130,6 @@ module.exports = new function() {
                 callback(null, publicKeyBytesLen);
             });
     };
-
-//    /**
-//     * Calculates then extension ID from the public key read from the header of the crx.
-//     * The crx is found in this.crxPath.
-//     * For the crx file format see: http://developer.chrome.com/extensions/crx.html
-//     * @param callback - Will be called with (err, extensionId).
-//     */
-//    this.readExtensionId = function (callback) {
-//        var that = this;
-//
-////        nCenterPublicKey = 'MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQCmzcH+EdLz3eCcmEerra/lgaM4iQBzQNHmMszDEfq04hNUCRgP7ham3Qk+XLzHc3XALcQH5yUuXjzPMaQ+LsGKMnV3j7U5tH86uQXixApCNww8iUJkgQbM8uNYshCSyyWCZGdjrJhlca2uyHhtwKK/47hqpzpjv3war97waWFiSwIDAQAB';
-////        this.publicKey = new Buffer(nCenterPublicKey, 'base64');
-////
-////        t = this.generateAppId();
-////        console.log("t:", t);
-////        debugger;
-//
-//        fs.open(this.crxPath, 'r', function (err, fd) {
-//            that.readPublicKeyLength(fd, function (err, publicKeyBytesLen) {
-//                if (err) {
-//                    fs.close(fd); //we don't need this stream anymore
-//                    return callback(err);
-//                }
-//
-//                if (publicKeyBytesLen <= 0) {
-//                    fs.close(fd); //we don't need this stream anymore
-//                    return callback('Got wrong length of public key. the value read was: ' + publicKeyBytesLen);
-//                }
-//
-//                fs.read(fd, new Buffer(publicKeyBytesLen), 0, publicKeyBytesLen, null,
-//                    function (err, numBytesRead, buffer) {
-//                        fs.close(fd); //we don't need this stream anymore
-//
-//                        if (err)
-//                            return callback(err);
-//
-//                        if (numBytesRead !== publicKeyBytesLen)
-//                            return callback('Number of bytes read was ' + numBytesRead + ' but expected ' + publicKeyBytesLen);
-//
-//                        that.publicKey = buffer;
-//                        that.generateAppId();
-//                        console.log('extension ID:', that.appId);
-//                        callback(null, that.appId);
-//                    });
-//            });
-//        });
-//    };
 
     this.readExtensionId = function (callback) {
         var that = this;

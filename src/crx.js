@@ -13,7 +13,6 @@ require('buffertools');
 
 module.exports = new function() {
   function ChromeExtension(attrs) {
-      console.log('T.Z:', __dirname);
     if (this instanceof ChromeExtension) {
       for (var name in attrs) this[name] = attrs[name];
 
@@ -126,8 +125,6 @@ module.exports = new function() {
                 if (numBytesRead !== readLength)
                     return callback('Number of bytes read was ' + numBytesRead + ' but expected ' + readLength);
 
-                console.log('Buffer\'s first 4 bytes are:', buffer.slice(0, 4).toString());
-
                 lenBuffer = buffer.slice(PUB_KEY_LENGTH_OFFSET, PUB_KEY_LENGTH_OFFSET + PUB_KEY_LENGTH);
                 publicKeyBytesLen = lenBuffer.readUInt8(0, 'little'); //the crx headers use little endian format
                 callback(null, publicKeyBytesLen);
@@ -145,7 +142,6 @@ module.exports = new function() {
 
             that.publicKey = publicKey;
             that.generateAppId();
-            console.log('extension ID:', that.appId);
             callback(null, that.appId);
         });
     };

@@ -191,18 +191,8 @@ module.exports = new function() {
   this.unpack = function (callback) {
       var unzipStr = 'unzip -qd '+ this.path +' ' + this.crxPath,
           that = this;
-//          unzip = spawn('unzip', ['-d', this.path, this.crxPath]);
-
-//      exec(unzipStr, this.onLoadFinished.call(this, function () {
-//          that.rootDirectory = that.path;
-//          if (typeof callback === 'function')
-//              callback();
-//      }));
-
-      exec(unzipStr, function (err) {
-          if (err)
-            return callback(err);
-
+      exec(unzipStr, function () {
+          //deliberately not handling errors, because unzipping a crx always yields a warning
           that.rootDirectory = that.path;
           that.onLoadFinished(callback);
       });

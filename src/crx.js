@@ -186,7 +186,7 @@ module.exports = new function() {
   /**
    * Extracts the .crx file located in the 'crxPath' passed in the constructor,
    * to the folder defined in this.path.
-   * @param {function} callback - Will be called with the path to which the .crx file has been extracted.
+   * @param {function} callback - Will be called with (err)
    */
   this.unpack = function (callback) {
       var unzipStr = 'unzip -qd '+ this.path +' ' + this.crxPath,
@@ -199,7 +199,10 @@ module.exports = new function() {
 //              callback();
 //      }));
 
-      exec(unzipStr, function () {
+      exec(unzipStr, function (err) {
+          if (err)
+            return callback(err);
+
           that.rootDirectory = that.path;
           that.onLoadFinished(callback);
       });

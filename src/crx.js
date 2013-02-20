@@ -80,12 +80,14 @@ module.exports = new function() {
      */
     this._writeCrx = function (callback) {
         var pemFilename = this.path+'.pem',
+            pemExists = fs.existsSync(pemFilename),
             packerPath = path.resolve(__dirname+'/../pack.sh'),
             packer,
             crxFilename;
 
-        //1. save the private key to a PEM file
-        fs.writeFileSync(pemFilename, this.privateKey);
+        //1. save the private key to a PEM file, if it doesn't exist yet
+        if (!pemExists)
+          fs.writeFileSync(pemFilename, this.privateKey);
 
         //2. execute pack.sh with /tmp
         packer = spawn(packerPath, [this.path, pemFilename, '/tmp']);
@@ -136,9 +138,8 @@ module.exports = new function() {
         if (typeof callback !== 'function')
             return;
 
-        this.readPublicKeyFromFile(function (err, publicKey) {
-            if (err)
-                return callback(err);
+        this.readPublicKeyFromCrx(function (err, publicKey) {
+            if (err) return callback(err);
 
             that.publicKey = publicKey;
             that.generateAppId();
@@ -150,7 +151,7 @@ module.exports = new function() {
      * Reads the public key from the header of the CRX file found in this.crx.
      * @param callback - Will be called with (err, publicKey)
      */
-    this.readPublicKeyFromFile = function (callback) {
+    this.readPublicKeyFromCrx = function (callback) {
         var that = this;
         if (typeof callback !== 'function')
             return;
@@ -203,6 +204,12 @@ module.exports = new function() {
    * @param callback
    */
   this.onLoadFinished = function (callback) {
+      if (this.manifest) {
+        this.loaded = true;
+        if (typeof callback === 'function')
+            return callback();
+      }
+
       this.manifest = require(join(this.path, "manifest.json"));
       this.loaded = true;
 
@@ -289,6 +296,38 @@ module.exports = new function() {
     };
 
     /**
+     * Generates a .pem file for this directory, and returns (err, privateKeyFilePath, appID).
+     */
+    this.generatePrivateKey = function (dirPath, callback) {
+      var keyFileName = 'key.pem';
+      var keyFilePath = path.join(dirPath, keyFileName);
+
+      var exists = fs.existsSync(keyFilePath);
+
+      if (exists) return callback && callback(null);
+
+      var command = "ssh-keygen -N '' -b 1024 -t rsa -f " + keyFileName;
+
+      exec(command, {cwd: dirPath}, function(err) {
+        if (err) return callback && callback(err);
+
+        //save the private key before we delete its file
+        this.privateKey = fs.readFileSync(keyFilePath);
+
+        var pubkeyFilePath = keyFilePath + '.pub';
+        //save the public key before we delete its file
+        this.publicKey = fs.readFileSync(pubkeyFilePath);
+        this.generateAppId();
+
+        //now delete the keys' files
+        fs.unlinkSync(pubkeyFilePath);
+        fs.unlinkSync(keyFilePath);
+        
+        callback && callback(null, keyFilePath, this.appId);
+      }.bind(this));
+    };
+
+    /**
      * Sets this.privateKey to be the given private key, if the given key is indeed the one that was used
      * to create the CRX in this.crxPath.
      * @param privateKey
@@ -326,7 +365,7 @@ module.exports = new function() {
         this.calculatePublicKeyFromPrivateKey(privateKey, function (err, publicKeyFromPrivateKey) {
             if (err)
                 return callback(err);
-            that.readPublicKeyFromFile(function (err, publicKeyReadFromFile) {
+            that.readPublicKeyFromCrx(function (err, publicKeyReadFromFile) {
                 var privateKeyBelongsToCrx;
                 if (err)
                     return callback(err);
